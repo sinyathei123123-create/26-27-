@@ -1,0 +1,657 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>週五學會點名與名單管理系統 (多端即時同步版)</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- SheetJS (Excel 匯出) -->
+    <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+    <!-- Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+</head>
+<body class="bg-slate-100 text-slate-800 font-sans min-h-screen pb-12">
+
+    <!-- 頂部導覽列 -->
+    <header class="bg-indigo-700 text-white shadow-lg sticky top-0 z-30">
+        <div class="max-w-7xl mx-auto px-4 py-4 flex flex-wrap justify-between items-center gap-4">
+            <div class="flex items-center space-x-3">
+                <i data-lucide="calendar-check-2" class="w-8 h-8 text-amber-300"></i>
+                <div>
+                    <h1 class="text-xl font-bold tracking-wide">週五學會點名系統</h1>
+                    <p class="text-xs text-indigo-200" id="syncStatus">系統狀態：初始化中...</p>
+                </div>
+            </div>
+            
+            <div class="flex items-center space-x-2">
+                <button onclick="switchTab('main')" id="btnTabMain" class="px-4 py-2 rounded-lg text-sm font-medium bg-indigo-800 text-white transition flex items-center gap-1.5 shadow-inner">
+                    <i data-lucide="layout-dashboard" class="w-4 h-4"></i> 點名管理
+                </button>
+                <button onclick="switchTab('export')" id="btnTabExport" class="px-4 py-2 rounded-lg text-sm font-medium text-indigo-100 hover:bg-indigo-600 transition flex items-center gap-1.5">
+                    <i data-lucide="file-spreadsheet" class="w-4 h-4"></i> 匯出報表
+                </button>
+            </div>
+        </div>
+    </header>
+
+    <main class="max-w-7xl mx-auto px-4 mt-6">
+
+        <!-- 頁籤 1: 點名管理頁面 -->
+        <section id="tabMain" class="space-y-6">
+            
+            <!-- 日期、成員管理與集會狀態設定控制列 -->
+            <div class="bg-white p-5 rounded-xl shadow-sm border border-slate-200 space-y-4">
+                <div class="flex flex-wrap items-center justify-between gap-4">
+                    
+                    <!-- 左側：日期與成員管理按鈕組合 -->
+                    <div class="flex flex-wrap items-center gap-3">
+                        <label class="text-sm font-semibold text-slate-600 flex items-center gap-1">
+                            <i data-lucide="calendar" class="w-4 h-4 text-indigo-600"></i> 選擇日期：
+                        </label>
+                        <input type="date" id="attendanceDate" onchange="onDateChange()" class="border border-slate-300 rounded-lg px-3 py-1.5 text-sm font-medium focus:ring-2 focus:ring-indigo-500 focus:outline-none">
+                        
+                        <button onclick="jumpToThisFriday()" class="px-3 py-1.5 bg-indigo-50 text-indigo-600 hover:bg-indigo-100 rounded-lg text-xs font-semibold transition border border-indigo-200 flex items-center gap-1">
+                            <i data-lucide="rotate-ccw" class="w-3.5 h-3.5"></i> 切換至本週五
+                        </button>
+
+                        <!-- 成員管理按鈕直接放在選擇日期旁邊 -->
+                        <button onclick="openMemberModal()" class="px-3 py-1.5 bg-slate-800 text-white hover:bg-slate-900 rounded-lg text-xs font-semibold transition flex items-center gap-1 shadow-sm">
+                            <i data-lucide="users" class="w-3.5 h-3.5"></i> 成員管理 (<span id="memberHeaderCount">0</span>)
+                        </button>
+
+                        <span id="fridayNoticeBadge" class="hidden text-xs bg-emerald-100 text-emerald-800 px-3 py-1.5 rounded-full font-bold flex items-center gap-1">
+                            <i data-lucide="check-circle-2" class="w-3.5 h-3.5 text-emerald-600"></i> 今日為集會日 (星期五)
+                        </span>
+                    </div>
+
+                    <!-- 右側：集會類型選單與一鍵全選 -->
+                    <div class="flex flex-wrap items-center gap-3">
+                        <div class="flex items-center space-x-2">
+                            <label class="text-xs font-semibold text-slate-500">集會狀態：</label>
+                            <select id="meetingTypeSelect" onchange="onMeetingTypeChange(this.value)" class="border border-slate-300 rounded-lg px-3 py-1.5 text-sm font-medium focus:ring-2 focus:ring-indigo-500 focus:outline-none bg-slate-50">
+                                <option value="normal">正常集會</option>
+                                <option value="special">特別活動 / 補會</option>
+                                <option value="cancelled">集會取消</option>
+                            </select>
+                        </div>
+
+                        <button onclick="selectAllPresent()" id="btnSelectAllPresent" class="px-3.5 py-1.5 rounded-lg text-sm font-medium bg-emerald-600 text-white hover:bg-emerald-700 transition flex items-center gap-1 shadow-sm">
+                            <i data-lucide="check-square" class="w-4 h-4"></i> 一鍵全選出席
+                        </button>
+                    </div>
+                </div>
+
+                <!-- 僅在「特別活動 / 補會」或「集會取消」時才出現狀況原因備註區 -->
+                <div id="meetingNoteBox" class="hidden p-3 bg-amber-50 rounded-lg border border-amber-200 flex flex-col md:flex-row md:items-center gap-2">
+                    <span class="text-xs font-bold text-amber-800 flex items-center gap-1 min-w-[120px]">
+                        <i data-lucide="info" class="w-4 h-4"></i> 狀況原因備註：
+                    </span>
+                    <input type="text" id="meetingNoteInput" onchange="updateMeetingNote(this.value)" placeholder="如：黑雨警告、三號風球、學校考試、社團聯歡等說明" class="flex-1 border border-amber-300 rounded-md px-3 py-1 text-sm bg-white focus:ring-2 focus:ring-amber-500 focus:outline-none">
+                </div>
+            </div>
+
+            <!-- 取消例會告示牌 -->
+            <div id="cancelNotice" class="hidden bg-rose-50 border-l-4 border-rose-500 p-4 rounded-r-xl shadow-sm">
+                <div class="flex items-center space-x-2 text-rose-700 font-bold">
+                    <i data-lucide="alert-circle" class="w-5 h-5"></i>
+                    <span>本次集會已取消</span>
+                </div>
+                <p class="text-xs text-rose-600 mt-1">取消後所有成員狀態會自動顯示為「取消」，統計顯示「本次集會已取消」，全期統計將不計算缺席率。</p>
+            </div>
+
+            <!-- 主點名區列表 -->
+            <div class="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden flex flex-col">
+                <div class="p-4 bg-slate-50 border-b border-slate-200 flex flex-wrap justify-between items-center gap-2">
+                    <h2 class="font-bold text-slate-700 flex items-center gap-2">
+                        <i data-lucide="list-checks" class="w-5 h-5 text-indigo-600"></i> 出席點名列表
+                    </h2>
+                    <div class="flex items-center gap-3">
+                        <span id="attendanceSummaryBadge" class="text-xs bg-indigo-100 text-indigo-700 px-2.5 py-1 rounded-full font-semibold">當天總出席率：0%</span>
+                        <span id="memberCountBadge" class="text-xs bg-slate-200 text-slate-700 px-2.5 py-1 rounded-full font-semibold">共 0 人</span>
+                    </div>
+                </div>
+
+                <div class="divide-y divide-slate-100 flex-1" id="attendanceList">
+                    <!-- 動態載入點名名單 (內含名字旁邊的刪除垃圾桶按鈕) -->
+                </div>
+            </div>
+        </section>
+
+        <!-- 頁籤 2: 匯出報表頁面 -->
+        <section id="tabExport" class="hidden space-y-6">
+            <div class="bg-white p-6 rounded-xl shadow-sm border border-slate-200 max-w-2xl mx-auto space-y-5">
+                <h2 class="text-lg font-bold text-slate-800 flex items-center gap-2 border-b pb-3">
+                    <i data-lucide="download" class="w-5 h-5 text-indigo-600"></i> 匯出 Excel (.xlsx) 考勤報表
+                </h2>
+                
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                        <label class="block text-xs font-semibold text-slate-600 mb-1 flex items-center gap-1">
+                            <i data-lucide="calendar" class="w-3.5 h-3.5 text-indigo-600"></i> 開始日期：
+                        </label>
+                        <input type="date" id="exportStartDate" class="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 focus:outline-none">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-semibold text-slate-600 mb-1 flex items-center gap-1">
+                            <i data-lucide="calendar" class="w-3.5 h-3.5 text-indigo-600"></i> 結束日期：
+                        </label>
+                        <input type="date" id="exportEndDate" class="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-500 focus:outline-none">
+                    </div>
+                </div>
+
+                <div class="bg-indigo-50/70 p-3.5 rounded-lg border border-indigo-100 space-y-1">
+                    <p class="text-xs font-bold text-indigo-900 flex items-center gap-1">
+                        <i data-lucide="file-text" class="w-4 h-4 text-indigo-600"></i> 報表相容說明：
+                    </p>
+                    <ul class="text-xs text-indigo-800 space-y-0.5 list-disc list-inside">
+                        <li>如遇集會取消，Excel 欄位將清楚標記「取消 (原因)」，且不計算為同學的缺席。</li>
+                        <li>請假與遲到會在 Excel 儲存格內同步註記具體原因。</li>
+                        <li>試算表末端將自動附帶各學生的全期總出席率與缺席統計。</li>
+                    </ul>
+                </div>
+
+                <button onclick="exportToExcel()" class="w-full bg-emerald-600 text-white py-2.5 rounded-lg font-medium hover:bg-emerald-700 transition flex items-center justify-center gap-2 shadow-sm">
+                    <i data-lucide="file-output" class="w-5 h-5"></i> 生成並下載 Excel (.xlsx) 報表
+                </button>
+            </div>
+        </section>
+
+    </main>
+
+    <!-- 彈窗：成員管理與批次匯入 -->
+    <div id="memberModal" class="hidden fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+        <div class="bg-white rounded-2xl shadow-xl border border-slate-200 max-w-lg w-full p-6 space-y-4 max-h-[90vh] flex flex-col">
+            <div class="flex justify-between items-center border-b pb-3">
+                <h3 class="text-base font-bold text-slate-800 flex items-center gap-2">
+                    <i data-lucide="user-plus" class="w-5 h-5 text-indigo-600"></i> 成員管理與新增
+                </h3>
+                <button onclick="closeMemberModal()" class="text-slate-400 hover:text-slate-600 p-1 rounded-lg">
+                    <i data-lucide="x" class="w-5 h-5"></i>
+                </button>
+            </div>
+            
+            <!-- 單筆與批次新增區域 -->
+            <div class="space-y-3 bg-slate-50 p-3.5 rounded-xl border border-slate-200">
+                <div class="flex gap-2">
+                    <input type="text" id="newMemberName" placeholder="輸入單個成員姓名" class="flex-1 border border-slate-300 rounded-lg px-3 py-1.5 text-sm focus:ring-2 focus:ring-indigo-500 focus:outline-none">
+                    <button onclick="addMember()" class="bg-indigo-600 text-white px-4 py-1.5 rounded-lg text-sm font-medium hover:bg-indigo-700 transition flex items-center gap-1">
+                        <i data-lucide="plus" class="w-4 h-4"></i> 新增
+                    </button>
+                </div>
+                
+                <div class="border-t border-slate-200 pt-2">
+                    <label class="block text-xs font-semibold text-slate-600 mb-1">批次貼上多個姓名 (用換行或逗號分隔)：</label>
+                    <textarea id="batchInputText" rows="3" placeholder="張小明&#10;李大華&#10;王美麗, 陳強" class="w-full border border-slate-300 rounded-lg p-2 text-xs focus:ring-2 focus:ring-indigo-500 focus:outline-none bg-white"></textarea>
+                    <button onclick="submitBatchImport()" class="mt-1.5 w-full bg-slate-800 text-white py-1.5 rounded-lg text-xs font-medium hover:bg-slate-900 transition flex items-center justify-center gap-1">
+                        <i data-lucide="users" class="w-3.5 h-3.5"></i> 確定批次匯入
+                    </button>
+                </div>
+            </div>
+
+            <!-- 成員清單與刪除 -->
+            <div class="flex-1 overflow-y-auto space-y-1">
+                <div class="text-xs font-semibold text-slate-500 px-1 py-1 flex justify-between">
+                    <span>現有名單 (<span id="modalMemberTotalCount">0</span> 人)</span>
+                    <span>點擊右側垃圾桶可刪除成員</span>
+                </div>
+                <ul id="modalMemberList" class="divide-y divide-slate-100 bg-white border border-slate-200 rounded-lg">
+                    <!-- 動態載入成員刪除列表 -->
+                </ul>
+            </div>
+
+            <div class="flex justify-end pt-2 border-t">
+                <button onclick="closeMemberModal()" class="px-5 py-2 rounded-lg text-sm bg-slate-200 text-slate-700 font-medium hover:bg-slate-300 transition">關閉</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Firebase v10 模組化 SDK -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
+        import { getFirestore, doc, onSnapshot, setDoc } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+
+        // Firebase 項目設定
+        const firebaseConfig = {
+            apiKey: "AIzaSyBaM3vSSaTzHwBQFgYA5Uiiu8IURR-VS7k",
+            authDomain: "club-attendance-77142.firebaseapp.com",
+            projectId: "club-attendance-77142",
+            storageBucket: "club-attendance-77142.firebasestorage.app",
+            messagingSenderId: "1097833964276",
+            appId: "1:1097833964276:web:c663c337f379bc877874a1",
+            measurementId: "G-ZXG0XD4MJX"
+        };
+
+        // 初始化 Firebase
+        const app = initializeApp(firebaseConfig);
+        const db = getFirestore(app);
+        const docRef = doc(db, "attendance_system", "shared_state");
+
+        // 全域狀態變數
+        window.state = {
+            members: ["張小明", "李大華", "王美麗"],
+            records: {} // { "YYYY-MM-DD": { meetingType: "normal"|"special"|"cancelled", note: "", statuses: { "姓名": { status: "Present"|"Late"|"Leave"|"Absent", reason: "" } } } }
+        };
+
+        // 監聽 Firebase 資料庫變化（多端即時同步）
+        onSnapshot(docRef, (snapshot) => {
+            const statusEl = document.getElementById("syncStatus");
+            if (snapshot.exists()) {
+                window.state = snapshot.data();
+                if(!window.state.members) window.state.members = [];
+                if(!window.state.records) window.state.records = {};
+                statusEl.innerText = "系統狀態：已連線 (即時同步中)";
+                statusEl.className = "text-xs text-emerald-300 font-semibold";
+            } else {
+                saveStateToFirebase(); // 初始化資料庫
+                statusEl.innerText = "系統狀態：已新建資料庫";
+            }
+            renderCurrentDateView();
+            renderModalMemberList();
+        }, (error) => {
+            console.error("Firebase Sync Error: ", error);
+            const statusEl = document.getElementById("syncStatus");
+            statusEl.innerText = "系統狀態：連線失敗 (請確認已開啟 Firestore)";
+            statusEl.className = "text-xs text-rose-300 font-semibold";
+        });
+
+        // 儲存狀態至 Firebase
+        window.saveStateToFirebase = async function() {
+            try {
+                await setDoc(docRef, window.state);
+            } catch (e) {
+                console.error("Error writing document: ", e);
+            }
+        };
+
+        window.onload = function() {
+            const todayStr = getTodayISOString();
+            document.getElementById("attendanceDate").value = todayStr;
+
+            // 自動判定是否為週五
+            checkIfTodayIsFriday(todayStr);
+
+            // 預設匯出日期為本週五
+            const thisFriday = getNearestFriday(new Date());
+            document.getElementById("exportStartDate").value = thisFriday;
+            document.getElementById("exportEndDate").value = thisFriday;
+
+            lucide.createIcons();
+        };
+    </script>
+
+    <!-- 邏輯處理 JavaScript -->
+    <script>
+        function getTodayISOString() {
+            const date = new Date();
+            const year = date.getFullYear();
+            const month = String(date.getMonth() + 1).padStart(2, '0');
+            const day = String(date.getDate()).padStart(2, '0');
+            return `${year}-${month}-${day}`;
+        }
+
+        function getNearestFriday(dateObj) {
+            const date = new Date(dateObj);
+            const day = date.getDay();
+            const diff = (day >= 5) ? (day - 5) : (day + 2);
+            date.setDate(date.getDate() - diff);
+            const year = date.getFullYear();
+            const month = String(date.getMonth() + 1).padStart(2, '0');
+            const d = String(date.getDate()).padStart(2, '0');
+            return `${year}-${month}-${d}`;
+        }
+
+        function checkIfTodayIsFriday(dateStr) {
+            const d = new Date(dateStr);
+            const fridayBadge = document.getElementById("fridayNoticeBadge");
+            if (d.getDay() === 5) {
+                fridayBadge.classList.remove("hidden");
+            } else {
+                fridayBadge.classList.add("hidden");
+            }
+        }
+
+        function jumpToThisFriday() {
+            const fridayStr = getNearestFriday(new Date());
+            document.getElementById("attendanceDate").value = fridayStr;
+            onDateChange();
+        }
+
+        function switchTab(tabName) {
+            document.getElementById("tabMain").classList.add("hidden");
+            document.getElementById("tabExport").classList.add("hidden");
+
+            document.getElementById("btnTabMain").className = "px-4 py-2 rounded-lg text-sm font-medium text-indigo-100 hover:bg-indigo-600 transition flex items-center gap-1.5";
+            document.getElementById("btnTabExport").className = "px-4 py-2 rounded-lg text-sm font-medium text-indigo-100 hover:bg-indigo-600 transition flex items-center gap-1.5";
+
+            if (tabName === 'main') {
+                document.getElementById("tabMain").classList.remove("hidden");
+                document.getElementById("btnTabMain").className = "px-4 py-2 rounded-lg text-sm font-medium bg-indigo-800 text-white transition flex items-center gap-1.5 shadow-inner";
+            } else if (tabName === 'export') {
+                document.getElementById("tabExport").classList.remove("hidden");
+                document.getElementById("btnTabExport").className = "px-4 py-2 rounded-lg text-sm font-medium bg-indigo-800 text-white transition flex items-center gap-1.5 shadow-inner";
+            }
+        }
+
+        function onDateChange() {
+            const dateStr = document.getElementById("attendanceDate").value;
+            checkIfTodayIsFriday(dateStr);
+            renderCurrentDateView();
+        }
+
+        function getCurrentRecord(dateStr) {
+            if (!window.state.records[dateStr]) {
+                window.state.records[dateStr] = {
+                    meetingType: "normal", // normal, special, cancelled
+                    note: "",
+                    statuses: {}
+                };
+            }
+            if (window.state.records[dateStr].isCancelled !== undefined) {
+                if(window.state.records[dateStr].isCancelled) {
+                    window.state.records[dateStr].meetingType = "cancelled";
+                }
+                if(window.state.records[dateStr].cancelReason) {
+                    window.state.records[dateStr].note = window.state.records[dateStr].cancelReason;
+                }
+                delete window.state.records[dateStr].isCancelled;
+                delete window.state.records[dateStr].cancelReason;
+            }
+            return window.state.records[dateStr];
+        }
+
+        function renderCurrentDateView() {
+            const dateStr = document.getElementById("attendanceDate").value;
+            if (!dateStr) return;
+
+            const record = getCurrentRecord(dateStr);
+
+            const meetingTypeSelect = document.getElementById("meetingTypeSelect");
+            const meetingNoteBox = document.getElementById("meetingNoteBox");
+            const meetingNoteInput = document.getElementById("meetingNoteInput");
+
+            meetingTypeSelect.value = record.meetingType || "normal";
+            meetingNoteInput.value = record.note || "";
+
+            // 僅在特別活動或集會取消時才顯示狀況原因備註
+            if (record.meetingType === 'special' || record.meetingType === 'cancelled') {
+                meetingNoteBox.classList.remove("hidden");
+            } else {
+                meetingNoteBox.classList.add("hidden");
+            }
+
+            const cancelNotice = document.getElementById("cancelNotice");
+            const btnSelectAll = document.getElementById("btnSelectAllPresent");
+
+            if (record.meetingType === 'cancelled') {
+                cancelNotice.classList.remove("hidden");
+                btnSelectAll.classList.add("opacity-50", "pointer-events-none");
+            } else {
+                cancelNotice.classList.add("hidden");
+                btnSelectAll.classList.remove("opacity-50", "pointer-events-none");
+            }
+
+            const listContainer = document.getElementById("attendanceList");
+            listContainer.innerHTML = "";
+
+            document.getElementById("memberCountBadge").innerText = `共 ${window.state.members.length} 人`;
+            document.getElementById("memberHeaderCount").innerText = window.state.members.length;
+
+            let presentCount = 0;
+
+            window.state.members.forEach((member, index) => {
+                // 預設為缺席 Absent
+                const memberData = record.statuses[member] || { status: "Absent", reason: "" };
+                
+                if (memberData.status === 'Present') {
+                    presentCount++;
+                }
+
+                const div = document.createElement("div");
+                div.className = "p-4 flex flex-col md:flex-row md:items-center justify-between gap-3 hover:bg-slate-50 transition";
+
+                const isCancelled = (record.meetingType === 'cancelled');
+                const isShowReason = (!isCancelled && (memberData.status === 'Late' || memberData.status === 'Leave'));
+
+                // 直接在名字旁邊加入垃圾桶圖示按鈕
+                div.innerHTML = `
+                    <div class="flex items-center space-x-2">
+                        <span class="font-semibold text-slate-800 text-base min-w-[80px]">${member}</span>
+                        
+                        <button type="button" onclick="removeMember(${index})" title="刪除此成員" class="text-slate-400 hover:text-rose-600 p-1 rounded-md hover:bg-rose-50 transition">
+                            <i data-lucide="trash-2" class="w-4 h-4 pointer-events-none"></i>
+                        </button>
+
+                        ${isCancelled ? '<span class="text-xs bg-rose-100 text-rose-700 font-medium px-2 py-0.5 rounded">取消</span>' : ''}
+                    </div>
+                    <div class="flex flex-wrap items-center gap-2">
+                        <div class="inline-flex rounded-lg border border-slate-200 p-0.5 bg-slate-100 ${isCancelled ? 'opacity-40 pointer-events-none' : ''}">
+                            <button onclick="setStatus('${member}', 'Present')" class="px-3 py-1 text-xs font-semibold rounded-md transition ${memberData.status === 'Present' ? 'bg-emerald-600 text-white shadow-sm' : 'text-slate-600 hover:text-slate-900'}">出席</button>
+                            <button onclick="setStatus('${member}', 'Late')" class="px-3 py-1 text-xs font-semibold rounded-md transition ${memberData.status === 'Late' ? 'bg-amber-500 text-white shadow-sm' : 'text-slate-600 hover:text-slate-900'}">遲到</button>
+                            <button onclick="setStatus('${member}', 'Leave')" class="px-3 py-1 text-xs font-semibold rounded-md transition ${memberData.status === 'Leave' ? 'bg-blue-600 text-white shadow-sm' : 'text-slate-600 hover:text-slate-900'}">請假</button>
+                            <button onclick="setStatus('${member}', 'Absent')" class="px-3 py-1 text-xs font-semibold rounded-md transition ${memberData.status === 'Absent' ? 'bg-rose-600 text-white shadow-sm' : 'text-slate-600 hover:text-slate-900'}">缺席</button>
+                        </div>
+                        ${isShowReason ? `
+                            <input type="text" placeholder="請輸入${memberData.status === 'Late' ? '遲到' : '請假'}原因" value="${memberData.reason || ''}" 
+                            onchange="setReason('${member}', this.value)"
+                            class="border border-slate-300 rounded-lg px-2.5 py-1 text-xs focus:ring-2 focus:ring-indigo-500 focus:outline-none w-36 md:w-44">
+                        ` : ''}
+                    </div>
+                `;
+                listContainer.appendChild(div);
+            });
+
+            // 當天出席率計算
+            const summaryBadge = document.getElementById("attendanceSummaryBadge");
+            if (isCancelled) {
+                summaryBadge.innerText = "本次集會已取消";
+                summaryBadge.className = "text-xs bg-rose-100 text-rose-700 px-2.5 py-1 rounded-full font-semibold";
+            } else {
+                const rate = window.state.members.length > 0 ? Math.round((presentCount / window.state.members.length) * 100) : 0;
+                summaryBadge.innerText = `當天出席率：${rate}% (${presentCount}/${window.state.members.length})`;
+                summaryBadge.className = "text-xs bg-indigo-100 text-indigo-700 px-2.5 py-1 rounded-full font-semibold";
+            }
+
+            lucide.createIcons();
+        }
+
+        function setStatus(member, status) {
+            const dateStr = document.getElementById("attendanceDate").value;
+            const record = getCurrentRecord(dateStr);
+            if (!record.statuses[member]) {
+                record.statuses[member] = { status: "Absent", reason: "" };
+            }
+            record.statuses[member].status = status;
+            window.saveStateToFirebase();
+        }
+
+        function setReason(member, reason) {
+            const dateStr = document.getElementById("attendanceDate").value;
+            const record = getCurrentRecord(dateStr);
+            if (record.statuses[member]) {
+                record.statuses[member].reason = reason;
+                window.saveStateToFirebase();
+            }
+        }
+
+        function selectAllPresent() {
+            const dateStr = document.getElementById("attendanceDate").value;
+            const record = getCurrentRecord(dateStr);
+            if (record.meetingType === 'cancelled') return;
+
+            window.state.members.forEach(member => {
+                if (!record.statuses[member]) {
+                    record.statuses[member] = { status: "Present", reason: "" };
+                } else {
+                    record.statuses[member].status = "Present";
+                }
+            });
+            window.saveStateToFirebase();
+        }
+
+        function onMeetingTypeChange(type) {
+            const dateStr = document.getElementById("attendanceDate").value;
+            const record = getCurrentRecord(dateStr);
+            record.meetingType = type;
+            window.saveStateToFirebase();
+        }
+
+        function updateMeetingNote(val) {
+            const dateStr = document.getElementById("attendanceDate").value;
+            const record = getCurrentRecord(dateStr);
+            record.note = val;
+            window.saveStateToFirebase();
+        }
+
+        // 渲染彈窗內的成員管理清單
+        function renderModalMemberList() {
+            const ul = document.getElementById("modalMemberList");
+            const count = document.getElementById("modalMemberTotalCount");
+            if (!ul || !count) return;
+
+            ul.innerHTML = "";
+            count.innerText = window.state.members.length;
+
+            window.state.members.forEach((member, index) => {
+                const li = document.createElement("li");
+                li.className = "p-2.5 flex justify-between items-center hover:bg-slate-50 transition";
+                li.innerHTML = `
+                    <span class="font-medium text-slate-800 text-sm">${member}</span>
+                    <button type="button" onclick="removeMember(${index})" class="text-rose-600 hover:text-rose-800 p-1 rounded-lg hover:bg-rose-50 transition">
+                        <i data-lucide="trash-2" class="w-4 h-4 pointer-events-none"></i>
+                    </button>
+                `;
+                ul.appendChild(li);
+            });
+            lucide.createIcons();
+        }
+
+        function openMemberModal() {
+            document.getElementById("memberModal").classList.remove("hidden");
+            renderModalMemberList();
+        }
+
+        function closeMemberModal() {
+            document.getElementById("memberModal").classList.add("hidden");
+            document.getElementById("newMemberName").value = "";
+            document.getElementById("batchInputText").value = "";
+        }
+
+        function addMember() {
+            const input = document.getElementById("newMemberName");
+            const name = input.value.trim();
+            if (!name) return alert("請輸入成員姓名");
+            if (window.state.members.includes(name)) return alert("該成員已存在");
+
+            window.state.members.push(name);
+            input.value = "";
+            window.saveStateToFirebase();
+            renderModalMemberList();
+        }
+
+        function submitBatchImport() {
+            const rawText = document.getElementById("batchInputText").value;
+            if (!rawText.trim()) return alert("請輸入姓名內容");
+
+            const names = rawText.split(/[\n,，]/).map(n => n.trim()).filter(n => n.length > 0);
+            
+            let addedCount = 0;
+            names.forEach(name => {
+                if (!window.state.members.includes(name)) {
+                    window.state.members.push(name);
+                    addedCount++;
+                }
+            });
+
+            document.getElementById("batchInputText").value = "";
+            window.saveStateToFirebase();
+            renderModalMemberList();
+            alert(`成功批次匯入 ${addedCount} 位成員！`);
+        }
+
+        function removeMember(index) {
+            const targetName = window.state.members[index];
+            if (confirm(`確定要刪除成員「${targetName}」嗎？`)) {
+                window.state.members.splice(index, 1);
+                window.saveStateToFirebase();
+                renderModalMemberList();
+            }
+        }
+
+        function exportToExcel() {
+            const start = document.getElementById("exportStartDate").value;
+            const end = document.getElementById("exportEndDate").value;
+
+            if (!start || !end) return alert("請選擇起止日期");
+            if (start > end) return alert("開始日期不能晚於結束日期");
+
+            const allRecordDates = Object.keys(window.state.records).filter(d => d >= start && d <= end);
+
+            let curr = new Date(start);
+            const endDate = new Date(end);
+            const targetDates = new Set(allRecordDates);
+
+            while (curr <= endDate) {
+                const year = curr.getFullYear();
+                const month = String(curr.getMonth() + 1).padStart(2, '0');
+                const day = String(curr.getDate()).padStart(2, '0');
+                const dateStr = `${year}-${month}-${day}`;
+                
+                if (curr.getDay() === 5 || window.state.records[dateStr]) {
+                    targetDates.add(dateStr);
+                }
+                curr.setDate(curr.getDate() + 1);
+            }
+
+            const sortedDates = Array.from(targetDates).sort();
+
+            if (sortedDates.length === 0) return alert("選定日期範圍內無任何紀錄或集會日！");
+
+            const statusMap = { "Present": "出席", "Late": "遲到", "Leave": "請假", "Absent": "缺席" };
+            const excelData = [];
+
+            window.state.members.forEach(member => {
+                const row = { "成員姓名": member };
+                let presentCount = 0;
+                let validMeetingCount = 0;
+                let absentCount = 0;
+
+                sortedDates.forEach(d => {
+                    const rec = window.state.records[d];
+                    
+                    if (rec && rec.meetingType === 'cancelled') {
+                        row[d] = `取消 (${rec.note || '無原因'})`;
+                    } else if (rec && rec.statuses && rec.statuses[member]) {
+                        validMeetingCount++;
+                        const st = rec.statuses[member];
+                        let text = statusMap[st.status] || "缺席";
+                        
+                        if (st.status === 'Present') presentCount++;
+                        if (st.status === 'Absent') absentCount++;
+
+                        if ((st.status === 'Late' || st.status === 'Leave') && st.reason) {
+                            text += ` (${st.reason})`;
+                        }
+                        row[d] = text;
+                    } else {
+                        validMeetingCount++;
+                        absentCount++;
+                        row[d] = "缺席";
+                    }
+                });
+
+                row["總出席次數"] = presentCount;
+                row["總缺席次數"] = absentCount;
+                row["總出席率"] = validMeetingCount > 0 ? `${Math.round((presentCount / validMeetingCount) * 100)}%` : "0%";
+
+                excelData.push(row);
+            });
+
+            const worksheet = XLSX.utils.json_to_sheet(excelData);
+            const workbook = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(workbook, worksheet, "考勤報表");
+            XLSX.writeFile(workbook, `學會考勤報表_${start}_至_${end}.xlsx`);
+        }
+    </script>
+</body>
+</html>
